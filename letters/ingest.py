@@ -13,6 +13,8 @@ Run a quick check from the project root:
     python -m letters.ingest
 """
 
+import argparse
+import json
 import math
 import re
 from pathlib import Path
@@ -270,16 +272,45 @@ def check_chunks(passages, chunks, max_words=MAX_WORDS):
     print(f"OK: {len(passages)} passages -> {len(chunks)} chunks ({len(split)} sections were split)")
 
 
+SOURCES = {
+    "meditations": {
+        "raw_path": RAW_PATH,
+        "parser": parse_meditations,
+        "check_passages": check_passages,
+        "translation": TRANSLATION,
+    },
+}
+
+
+def ingest(name, out_dir="data/processed", max_words=MAX_WORDS):
+    """Parse, check, chunk, check, and save one registered source."""
+    source = SOURCES[name]
+    passages = source["parser"](source["raw_path"])
+    source["check_passages"](passages)
+
+    chunks = chunk_all(
+        passages,
+        source=name,
+        translation=source["translation"],
+        max_words=max_words,
+    )
+    check_chunks(passages, chunks, max_words=max_words)
+
+    output_path = Path(out_dir) / f"{name}.jsonl"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as output:
+        for chunk in chunks:
+            output.write(json.dumps(chunk, ensure_ascii=False) + "\n")
+
+    print(f"{name}: {len(passages)} passages -> {len(chunks)} chunks -> {output_path}")
+
+
 if __name__ == "__main__":
-    passages = parse_meditations()
-    check_passages(passages)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("names", nargs="+", choices=SOURCES)
+    parser.add_argument("--max-words", type=int, default=MAX_WORDS)
+    parser.add_argument("--out-dir", default="data/processed")
+    args = parser.parse_args()
 
-    print()
-    chunks = chunk_all(passages)
-    check_chunks(passages, chunks)
-
-    print()
-    # Show how one long section was split (Book 3 section 4 is about 500 words).
-    example = [c for c in chunks if c["book"] == 3 and c["section"] == 4]
-    for c in example:
-        print(c["id"], "->", count_words(c["text"]), "words")
+    for name in args.names:
+        ingest(name, out_dir=args.out_dir, max_words=args.max_words)
